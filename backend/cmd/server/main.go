@@ -28,7 +28,8 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info(constants.LogDBConnected)
-	if e = db.AutoMigrate(&model.User{}, &model.Mood{}, &model.Assessment{}, &model.Journal{}, &model.UserAssessment{}); e != nil {
+	if e = db.AutoMigrate(&model.User{}, &model.Mood{}, &model.Assessment{}, &model.Journal{}, &model.UserAssessment{},
+		&model.AdjustmentPlan{}, &model.PlanVersion{}, &model.PlanDay{}, &model.PlanTask{}); e != nil {
 		logger.Error("database migrate failed", "error", e)
 		os.Exit(1)
 	}
@@ -37,15 +38,32 @@ func main() {
 	mr := repository.NewMoodRepository(db)
 	ar := repository.NewAssessmentRepository(db)
 	jr := repository.NewJournalRepository(db)
+	pr := repository.NewPlanRepository(db)
+	pdr := repository.NewPlanDataRepository(db)
+	if e = pr.EnsureIndexes(db); e != nil {
+		logger.Error("plan index ensure failed", "error", e)
+		os.Exit(1)
+	}
 	us := service.NewUserService(ur, logger)
 	ms := service.NewMoodService(mr, logger)
 	as := service.NewAssessmentService(ar, logger)
 	js := service.NewJournalService(jr, logger)
+	ps := service.NewPlanService(db, pr, pdr, logger)
+	// 新情绪/日记/测评提交后，自动重算进行中计划的后续建议（钩子内部吞错，不影响原始写入）。
+	ms.SetPlanHook(ps)
+	js.SetPlanHook(ps)
+	as.SetPlanHook(ps)
 	if e = as.Seed(); e != nil {
 		logger.Error("assessment seed failed", "error", e)
 		os.Exit(1)
 	}
-	h := router.Handlers{User: handler.NewUserHandler(us, as, logger, cfg.JWTSecret, cfg.JWTIssuer), Mood: handler.NewMoodHandler(ms, logger), Assessment: handler.NewAssessmentHandler(as, logger), Journal: handler.NewJournalHandler(js, logger)}
+	h := router.Handlers{
+		User:       handler.NewUserHandler(us, as, logger, cfg.JWTSecret, cfg.JWTIssuer),
+		Mood:       handler.NewMoodHandler(ms, logger),
+		Assessment: handler.NewAssessmentHandler(as, logger),
+		Journal:    handler.NewJournalHandler(js, logger),
+		Plan:       handler.NewPlanHandler(ps, logger),
+	}
 	if e = router.New(cfg, h, logger).Run(":" + cfg.Port); e != nil {
 		logger.Error("server stopped", "error", e)
 		os.Exit(1)

@@ -14,13 +14,15 @@ import (
 )
 
 type MoodService struct {
-	repo   repository.MoodRepository
-	logger *slog.Logger
+	repo     repository.MoodRepository
+	logger   *slog.Logger
+	planHook PlanChangeHook
 }
 
 func NewMoodService(r repository.MoodRepository, l *slog.Logger) *MoodService {
-	return &MoodService{r, l}
+	return &MoodService{repo: r, logger: l}
 }
+func (s *MoodService) SetPlanHook(h PlanChangeHook) { s.planHook = h }
 func validTags(tags []string) bool {
 	allowed := map[string]bool{}
 	for _, v := range constants.MoodTags {
@@ -47,6 +49,7 @@ func (s *MoodService) Create(uid uint, req dto.MoodRequest) (*model.Mood, error)
 		return nil, fmt.Errorf("Mood[user_id] create failed: %w", e)
 	}
 	s.logger.Info(constants.LogMoodCreated, "user_id", uid, "mood_level", v.MoodLevel)
+	notifyPlan(s.planHook, uid, constants.PlanTriggerMood)
 	return v, nil
 }
 func (s *MoodService) List(uid uint, date string) ([]model.Mood, error) {

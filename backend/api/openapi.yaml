@@ -3,6 +3,18 @@ info: {title: MindGarden API, version: 1.0.0}
 paths:
   /v1/auth/register: {post: {summary: Register}}
   /v1/auth/login: {post: {summary: Login}}
-  /v1/moods: {get: {summary: List moods}, post: {summary: Create mood}}
+  /v1/moods: {get: {summary: List moods}, post: {summary: Create mood (triggers active plan recompute)}}
   /v1/assessments: {get: {summary: List assessments}}
-  /v1/journals: {get: {summary: List journals}, post: {summary: Create journal}}
+  /v1/journals: {get: {summary: List journals}, post: {summary: Create journal (triggers active plan recompute)}}
+  /v1/plans:
+    get: {summary: List plans (history)}
+    post: {summary: Create/idempotently get the single active 7-day plan}
+  /v1/plans/active: {get: {summary: Get current active/paused plan}}
+  /v1/plans/{id}: {get: {summary: Get plan detail (source, days, versions)}}
+  /v1/plans/{id}/regenerate: {post: {summary: Force recompute future open days}}
+  /v1/plans/{id}/actions: {post: {summary: pause/resume/complete/cancel}}
+  /v1/plans/{id}/report: {get: {summary: Completion curve & frozen report}}
+  /v1/plans/{id}/versions/{versionId}: {get: {summary: Read a (possibly replaced) version snapshot}}
+  /v1/plans/{id}/tasks: {post: {summary: Add handwritten task to a day}}
+  /v1/plans/{id}/tasks/{taskId}: {put: {summary: Toggle task / save handwritten note}}
+  /v1/plans/{id}/days/{dayIndex}/note: {put: {summary: Save a day's handwritten note}}

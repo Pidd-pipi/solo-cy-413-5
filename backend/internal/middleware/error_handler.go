@@ -27,8 +27,15 @@ func ErrorHandler(logger *slog.Logger) gin.HandlerFunc {
 		var app *util.AppError
 		if errors.As(e, &app) {
 			status := http.StatusBadRequest
-			if app.Code == constants.CodeUnauthorized {
+			switch app.Code {
+			case constants.CodeUnauthorized:
 				status = http.StatusUnauthorized
+			case constants.CodeForbidden:
+				status = http.StatusForbidden
+			case constants.CodeNotFound:
+				status = http.StatusNotFound
+			case constants.CodeConflict:
+				status = http.StatusConflict
 			}
 			c.JSON(status, dto.Response{Code: app.Code, Message: app.Message})
 			return

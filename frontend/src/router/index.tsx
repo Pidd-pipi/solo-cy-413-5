@@ -5,6 +5,7 @@ import { Dashboard } from '../pages/Dashboard';
 import { Moods } from '../pages/Moods';
 import { Assessments } from '../pages/Assessments';
 import { Journals } from '../pages/Journals';
+import { Plans } from '../pages/Plans';
 import { Profile } from '../pages/Profile';
 import { Login } from '../pages/Login';
 import { Shell } from '../shell';
@@ -25,6 +26,7 @@ export function AppRouter() {
       <Route path="/moods" element={secure(Moods)} />
       <Route path="/assessments" element={secure(Assessments)} />
       <Route path="/journals" element={secure(Journals)} />
+      <Route path="/plans" element={secure(Plans)} />
       <Route path="/profile" element={secure(Profile)} />
       <Route path="*" element={<RequireAuth><Shell><Dashboard /></Shell></RequireAuth>} />
     </Routes>

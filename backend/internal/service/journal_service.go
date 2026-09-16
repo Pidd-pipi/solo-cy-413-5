@@ -11,19 +11,22 @@ import (
 )
 
 type JournalService struct {
-	repo   repository.JournalRepository
-	logger *slog.Logger
+	repo     repository.JournalRepository
+	logger   *slog.Logger
+	planHook PlanChangeHook
 }
 
 func NewJournalService(r repository.JournalRepository, l *slog.Logger) *JournalService {
-	return &JournalService{r, l}
+	return &JournalService{repo: r, logger: l}
 }
+func (s *JournalService) SetPlanHook(h PlanChangeHook) { s.planHook = h }
 func (s *JournalService) Create(uid uint, req dto.JournalRequest) (*model.Journal, error) {
 	v := &model.Journal{UserID: uid, Title: req.Title, Content: req.Content, MoodLevel: req.MoodLevel, Weather: req.Weather, IsPrivate: req.IsPrivate}
 	if e := s.repo.Create(v); e != nil {
 		return nil, fmt.Errorf("Journal[user_id] create failed: %w", e)
 	}
 	s.logger.Info(constants.LogJournalCreated, "user_id", uid)
+	notifyPlan(s.planHook, uid, constants.PlanTriggerJournal)
 	return v, nil
 }
 func (s *JournalService) List(uid uint, level int) ([]model.Journal, error) {

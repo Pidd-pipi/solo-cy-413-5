@@ -15,3 +15,31 @@ func AssessmentText(c string) string {
 	return m[c]
 }
 func ThemeColor(t string) string { return constants.ThemeColors[t] }
+
+func PlanStatusText(s string) string {
+	m := map[string]string{
+		constants.PlanStatusActive:    "进行中",
+		constants.PlanStatusPaused:    "已暂停",
+		constants.PlanStatusCompleted: "已结束",
+		constants.PlanStatusCancelled: "已取消",
+	}
+	return m[s]
+}
+
+func PlanTriggerText(t string) string {
+	m := map[string]string{
+		constants.PlanTriggerInit:       "初次生成",
+		constants.PlanTriggerManual:     "手动重算",
+		constants.PlanTriggerMood:       "新情绪记录",
+		constants.PlanTriggerJournal:    "新日记",
+		constants.PlanTriggerAssessment: "新测评结果",
+	}
+	return m[t]
+}
+
+func PlanTaskSourceText(s string) string {
+	if s == constants.PlanTaskSourceCustom {
+		return "手写"
+	}
+	return "建议"
+}

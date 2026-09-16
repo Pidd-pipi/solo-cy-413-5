@@ -12,13 +12,15 @@ import (
 )
 
 type AssessmentService struct {
-	repo   repository.AssessmentRepository
-	logger *slog.Logger
+	repo     repository.AssessmentRepository
+	logger   *slog.Logger
+	planHook PlanChangeHook
 }
 
 func NewAssessmentService(r repository.AssessmentRepository, l *slog.Logger) *AssessmentService {
-	return &AssessmentService{r, l}
+	return &AssessmentService{repo: r, logger: l}
 }
+func (s *AssessmentService) SetPlanHook(h PlanChangeHook) { s.planHook = h }
 func validCategory(v string) bool {
 	for _, x := range constants.AssessmentCategories {
 		if x == v {
@@ -67,6 +69,7 @@ func (s *AssessmentService) Take(uid, id uint, req dto.TakeAssessmentRequest) (*
 		return nil, fmt.Errorf("UserAssessment[assessment_id] create failed: %w", e)
 	}
 	s.logger.Info(constants.LogAssessmentTaken, "user_id", uid, "assessment_id", id)
+	notifyPlan(s.planHook, uid, constants.PlanTriggerAssessment)
 	return v, nil
 }
 func (s *AssessmentService) Report(uid uint) ([]model.UserAssessment, error) {

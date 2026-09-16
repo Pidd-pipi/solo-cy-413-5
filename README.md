@@ -24,6 +24,7 @@ MindGarden 是一款用于温柔记录每日心情、完成轻量自我觉察测
 - **心理测评**：浏览压力/睡眠测评，答题后得到分数、结果和关照建议。
 - **日记本**：写作私密日记，记录天气和心情，并用时间轴回顾；`MoodCard` 同时服务情绪记录和日记页。
 - **个人中心**：修改资料、头像链接，查看完成过的测评报告。
+- **七日身心调整计划**：按近 14 天情绪/日记/测评生成 7 天建议；新记录自动重算“今天及以后、尚未完成”的建议；支持暂停、恢复、结束、取消，并可回看计划来源、每日完成情况与每个被替换的历史版本。
 - **JWT + 角色**：写入数据必须携带 JWT；测评创建接口仅允许 `admin` 角色。
 - **主题切换**：晨雾绿、夜间花园、薰衣草三套 CSS 变量主题。
 
@@ -94,6 +95,16 @@ Vite 会把本地 `/api` 请求重写到 `http://localhost:19413/v1`；Docker �
 | POST | `/api/v1/assessments` | 创建测评（仅 admin） |
 | GET / POST | `/api/v1/journals` | 查询（支持 `mood_level`）/创建日记 |
 | PUT / DELETE | `/api/v1/journals/:id` | 修改/删除日记 |
+| POST | `/api/v1/plans` | 生成/幂等获取唯一进行中计划 |
+| GET | `/api/v1/plans/active`、`/api/v1/plans` | 当前计划 / 历史计划列表 |
+| GET | `/api/v1/plans/:id` | 计划详情（来源、每日、版本） |
+| POST | `/api/v1/plans/:id/regenerate` | 用最新记录重算后续建议 |
+| POST | `/api/v1/plans/:id/actions` | 暂停 / 恢复 / 结束 / 取消 |
+| GET | `/api/v1/plans/:id/report` | 历史完成曲线与报告（终态冻结） |
+| GET | `/api/v1/plans/:id/versions/:versionId` | 回看某版本（含被替换版本）快照 |
+| POST | `/api/v1/plans/:id/tasks` | 给某天追加手写任务 |
+| PUT | `/api/v1/plans/:id/tasks/:taskId` | 勾选任务 / 保存手写感受 |
+| PUT | `/api/v1/plans/:id/days/:dayIndex/note` | 保存某天手写备注 |
 
 更精简的 OpenAPI 描述见 [`backend/api/openapi.yaml`](backend/api/openapi.yaml)。
 
@@ -168,6 +179,19 @@ Vite 会把本地 `/api` 请求重写到 `http://localhost:19413/v1`；Docker �
 - 主题触达 `constants/themes.go`、`util/formatters.go`、`constants/themes.ts`、`stores/themeStore.ts`、`utils/themeUtils.ts`、Ant Design `ConfigProvider` 和 CSS 变量。
 - 全局错误处理触达 `middleware/error_handler.go`、`util/app_error.go`、`utils/request.ts`、`GlobalErrorBoundary.tsx`。
 - 为满足既定的跨文件耦合约束，本项目**严禁合并职责到单一文件**：实体 CRUD、枚举、日志、错误与主题均拆在多层；`log_templates.go` 含 20+ 日志模板，字段或枚举调整需要同步更新多个层。这是题目要求的“牵一发动全身/屎山代码设计”兼容实现，生产项目通常应进一步降低这些重复耦合。
+
+## 七日身心调整计划：一致性与并发保证
+
+模块贯穿全栈：`adjustment_plans / plan_versions / plan_days / plan_tasks` 四张表 → `model` → `plan_repository.go`/`plan_data_repository.go` → `plan_engine.go`/`plan_service.go`/`plan_report.go` → `plan_handler.go` → `router/plans.go` → 前端 `api/plan.ts`、`types`、`constants/plan.ts`、`stores/planStore.ts`、`pages/Plans.tsx` 与 `components/common/Plan*.tsx`。
+
+- **单一进行中版本**：每账号至多一个 `active/paused` 计划，由部分唯一索引 `uk_plan_one_active … WHERE status IN ('active','paused')` 在数据库层兜底。
+- **按账号串行化**：所有写操作在“事务 + `pg_advisory_xact_lock(91413, user_id)`”内执行，同一账号的并发创建/勾选/重算排队执行；跨账号锁键不同，互不阻塞、不会串档。
+- **重算不覆盖已完成与手写内容**：新情绪/日记/测评提交后（经 `PlanChangeHook`）只重算“今天及以后、仍待办”的天；删除范围严格限制为 `source='system' AND status='pending'` 的任务，已完成/跳过的系统任务、全部手写任务（`source='custom'`）、天备注与任务感受永不删除。
+- **幂等**：建议引擎对近 14 天数据计算稳定指纹 `input_hash`，输入不变则跳过重算，不产生新版本/重复任务；重复点击“生成计划”直接返回现有计划；同日重复提交相同自定义任务会被去重。
+- **历史结论恒定**：结束/取消（或七天全部完成自动结束）时把完成曲线与报告冻结进 `report_json`；暂停/恢复/结束/取消后，详情与报告回读同一份结论，不随后续原始记录变化。
+- **版本可回看**：每次真实重算生成新 `plan_version`，旧版本置为 `replaced` 并保留当时来源与七日建议快照，页面“版本记录”可逐条查看被替换版本。
+
+状态枚举（`internal/constants/plan.go` ↔ `frontend/src/constants/plan.ts`）：计划 `active/paused/completed/cancelled`，任务 `pending/done/skipped`，来源 `system/custom`，触发 `init/manual/mood/journal/assessment`。
 
 ## License
 
