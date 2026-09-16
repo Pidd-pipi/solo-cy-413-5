@@ -686,10 +686,17 @@ func (s *PlanService) buildView(db *gorm.DB, p *model.AdjustmentPlan) (*dto.Plan
 		var snap snapshotFile
 		_ = json.Unmarshal([]byte(v.SnapshotJSON), &snap)
 		if v.Status == constants.PlanVersionCurrent {
+			// 默认取当前版本冻结来源；随后若能读到实时数据则以实时统计覆盖，
+			// 保证“来源统计与数据库实际条数一致”，即使该次重复提交没有产生新版本。
 			source = snap.Source
 			currentNo = v.Version
 		}
 		versionViews = append(versionViews, dto.PlanVersionView{ID: v.ID, Version: v.Version, Status: v.Status, Trigger: v.Trigger, InputHash: v.InputHash, CreatedAt: v.CreatedAt, ReplacedAt: v.ReplacedAt, DayCount: len(snap.Days)})
+	}
+	// 当前计划的来源按近 14 天实时数据计算：同日重复提交不产生新版本，
+	// 但来源中的原始记录数仍应与数据库实际条数一致。历史/被替换版本回看仍读各自冻结快照。
+	if live, lerr := s.loadSignal(db, p.UserID); lerr == nil {
+		source = toSource(live)
 	}
 
 	byDay := map[uint][]model.PlanTask{}

@@ -71,6 +71,12 @@ cd backend && go mod tidy && go run ./cmd/server
 # 后端构建与测试
 cd backend && go build ./... && go test ./...
 
+# 七日计划“重复源记录/重算保留”真实数据库回归（需可用的 PostgreSQL）
+export TEST_DATABASE_URL="host=127.0.0.1 port=5432 user=postgres dbname=mindgarden_test sslmode=disable TimeZone=Asia/Shanghai"
+go test ./internal/service/ -run TestPlanRegression -v
+# 未设置 TEST_DATABASE_URL 时该组用例自动 SKIP，不影响普通 go test ./...；用例用随机用户并在结尾清理，可重复运行
+
+
 # 终端 2：前端
 cd frontend && npm install && npm run dev
 ```
