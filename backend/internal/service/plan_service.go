@@ -150,8 +150,9 @@ func (s *PlanService) insertVersionAndDays(tx *gorm.DB, p *model.AdjustmentPlan,
 
 // recomputeFuture 在锁内用最新信号重算“今天及以后、仍 pending”的天。
 // 已完成/已跳过的天、全部自定义任务、所有手写内容均不触碰。
-// 返回 changed=false 表示输入未变或没有可重算的未来天（幂等，不产生新版本、不产生重复任务）。
-func (s *PlanService) recomputeFuture(tx *gorm.DB, p *model.AdjustmentPlan, trigger string, force bool) (bool, error) {
+// 只要去重后的有效输入指纹未变（含同日重复提交的情形），一律不产生新版本、不产生重复任务——
+// 即使是用户手动触发重算也一样。
+func (s *PlanService) recomputeFuture(tx *gorm.DB, p *model.AdjustmentPlan, trigger string) (bool, error) {
 	cur, e := s.plans.CurrentVersion(tx, p.ID)
 	if e != nil {
 		return false, fmt.Errorf("PlanVersion[plan_id=%d] current lookup failed: %w", p.ID, e)
@@ -160,7 +161,7 @@ func (s *PlanService) recomputeFuture(tx *gorm.DB, p *model.AdjustmentPlan, trig
 	if e != nil {
 		return false, e
 	}
-	if !force && sig.Fingerprint == cur.InputHash {
+	if sig.Fingerprint == cur.InputHash {
 		return false, nil
 	}
 	from := todayIndex(p.StartDate)
@@ -255,7 +256,7 @@ func (s *PlanService) OnSourceDataChanged(uid uint, trigger string) {
 		if p.Status != constants.PlanStatusActive {
 			return nil
 		}
-		_, err = s.recomputeFuture(tx, p, trigger, false)
+		_, err = s.recomputeFuture(tx, p, trigger)
 		return err
 	})
 	if e != nil {
@@ -271,7 +272,7 @@ func (s *PlanService) Regenerate(uid, planID uint) (*dto.PlanView, error) {
 		if err != nil {
 			return err
 		}
-		if _, err = s.recomputeFuture(tx, p, constants.PlanTriggerManual, true); err != nil {
+		if _, err = s.recomputeFuture(tx, p, constants.PlanTriggerManual); err != nil {
 			return err
 		}
 		p, err = s.plans.PlanByID(tx, p.ID, uid)
@@ -321,7 +322,7 @@ func (s *PlanService) Action(uid, planID uint, action string) (*dto.PlanView, er
 
 		// 恢复时用暂停期间的新数据补一次重算（仅未来天，幂等）。
 		if action == "resume" {
-			if _, err = s.recomputeFuture(tx, p, constants.PlanTriggerManual, false); err != nil {
+			if _, err = s.recomputeFuture(tx, p, constants.PlanTriggerManual); err != nil {
 				return err
 			}
 		}
@@ -729,7 +730,7 @@ func toSource(sig PlanSignal) dto.PlanSourceView {
 	if summary == nil {
 		summary = []string{}
 	}
-	return dto.PlanSourceView{WindowDays: sig.WindowDays, MoodCount: sig.MoodCount, JournalCount: sig.JournalCount, AssessmentCount: sig.AssessmentCount, AvgMood: sig.AvgMood, DominantTag: sig.DominantTag, LatestResult: sig.LatestResult, Summary: summary, InputHash: sig.Fingerprint}
+	return dto.PlanSourceView{WindowDays: sig.WindowDays, MoodCount: sig.MoodCount, RawMoodCount: sig.RawMoodCount, JournalCount: sig.JournalCount, AssessmentCount: sig.AssessmentCount, AvgMood: sig.AvgMood, DominantTag: sig.DominantTag, LatestResult: sig.LatestResult, Summary: summary, InputHash: sig.Fingerprint}
 }
 
 func todayIndex(start time.Time) int {

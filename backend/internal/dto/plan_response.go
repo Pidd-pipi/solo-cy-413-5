@@ -30,8 +30,11 @@ type PlanDayView struct {
 }
 
 type PlanSourceView struct {
-	WindowDays      int      `json:"window_days"`
-	MoodCount       int      `json:"mood_count"`
+	WindowDays int `json:"window_days"`
+	// MoodCount 为去重后参与建议的“有效观察”数。
+	MoodCount int `json:"mood_count"`
+	// RawMoodCount 为实际持久化的情绪记录数（含同日重复提交，原始记录均保留）。
+	RawMoodCount    int      `json:"raw_mood_count"`
 	JournalCount    int      `json:"journal_count"`
 	AssessmentCount int      `json:"assessment_count"`
 	AvgMood         float64  `json:"avg_mood"`

@@ -63,17 +63,71 @@ func TestFingerprintDeterministic(t *testing.T) {
 	}
 }
 
-func TestDuplicateSameDaySubmissionDoesNotChangeFingerprint(t *testing.T) {
+func TestDuplicateSameDaySubmissionDoesNotChangeSignal(t *testing.T) {
 	one := []model.Mood{
 		{MoodLevel: 6, MoodTags: tagsJSON(t, constants.MoodCalm), RecordDate: day(0)},
 	}
-	// 模拟同日重复提交两条完全相同的情绪：平均值不变、去重后输入行相同。
+	// 同账号、同一天、等级与标签完全相同的重复提交（共 3 条）。
 	dup := []model.Mood{
 		{MoodLevel: 6, MoodTags: tagsJSON(t, constants.MoodCalm), RecordDate: day(0)},
 		{MoodLevel: 6, MoodTags: tagsJSON(t, constants.MoodCalm), RecordDate: day(0)},
+		{MoodLevel: 6, MoodTags: tagsJSON(t, constants.MoodCalm), RecordDate: day(0)},
 	}
-	if BuildSignal(one, nil, nil).Fingerprint != BuildSignal(dup, nil, nil).Fingerprint {
-		t.Fatal("identical same-day duplicate must not change the input fingerprint")
+	a, b := BuildSignal(one, nil, nil), BuildSignal(dup, nil, nil)
+	if a.Fingerprint != b.Fingerprint {
+		t.Fatal("identical same-day duplicates must not change the fingerprint")
+	}
+	if b.MoodCount != 1 || b.AvgMood != 6 || b.RawMoodCount != 3 {
+		t.Fatalf("want 1 effective obs (avg 6) but 3 raw records, got count=%d avg=%.1f raw=%d", b.MoodCount, b.AvgMood, b.RawMoodCount)
+	}
+	if b.TagCounts[constants.MoodCalm] != 1 {
+		t.Fatalf("duplicate calm submissions must be counted once, got %d", b.TagCounts[constants.MoodCalm])
+	}
+	if a.MoodLow != b.MoodLow || a.Anxious != b.Anxious {
+		t.Fatal("duplicate submissions must not change threshold signals")
+	}
+}
+
+func TestSameContentOnDifferentDaysStillCounts(t *testing.T) {
+	// 不同日期、内容完全相同：应作为两条独立有效观察参与重算。
+	moods := []model.Mood{
+		{MoodLevel: 6, MoodTags: tagsJSON(t, constants.MoodCalm), RecordDate: day(-1)},
+		{MoodLevel: 6, MoodTags: tagsJSON(t, constants.MoodCalm), RecordDate: day(0)},
+	}
+	s := BuildSignal(moods, nil, nil)
+	if s.MoodCount != 2 {
+		t.Fatalf("different-day records must both count, got %d", s.MoodCount)
+	}
+	if BuildSignal(moods[:1], nil, nil).Fingerprint == s.Fingerprint {
+		t.Fatal("adding a same-content record on a different day must change the fingerprint")
+	}
+}
+
+func TestDifferentContentSameDayStillCounts(t *testing.T) {
+	// 同一天、等级不同：各自保留。
+	moods := []model.Mood{
+		{MoodLevel: 6, MoodTags: tagsJSON(t, constants.MoodCalm), RecordDate: day(0)},
+		{MoodLevel: 3, MoodTags: tagsJSON(t, constants.MoodAnxious), RecordDate: day(0)},
+	}
+	s := BuildSignal(moods, nil, nil)
+	if s.MoodCount != 2 {
+		t.Fatalf("same-day different-content records must both count, got %d", s.MoodCount)
+	}
+	if s.AvgMood != 4.5 {
+		t.Fatalf("want avg 4.5, got %.2f", s.AvgMood)
+	}
+}
+
+func TestTagOrderInsensitiveDedupe(t *testing.T) {
+	a := BuildSignal([]model.Mood{
+		{MoodLevel: 5, MoodTags: tagsJSON(t, constants.MoodAnxious, constants.MoodTired), RecordDate: day(0)},
+	}, nil, nil)
+	b := BuildSignal([]model.Mood{
+		{MoodLevel: 5, MoodTags: tagsJSON(t, constants.MoodTired, constants.MoodAnxious), RecordDate: day(0)},
+		{MoodLevel: 5, MoodTags: tagsJSON(t, constants.MoodTired, constants.MoodAnxious), RecordDate: day(0)},
+	}, nil, nil)
+	if a.Fingerprint != b.Fingerprint || b.MoodCount != 1 {
+		t.Fatal("same tags in different order must be equivalent and deduped")
 	}
 }
 

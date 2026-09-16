@@ -10,7 +10,11 @@ export function PlanSourceCard({source,trigger}:{source:PlanSource;trigger?:Plan
       建议依据近 {source.window_days} 天记录生成{trigger?` · 触发：${PLAN_TRIGGER_LABELS[trigger]}`:''}
     </Typography.Paragraph>
     <Descriptions size="small" column={2}>
-      <Descriptions.Item label="情绪记录"><Statistic value={source.mood_count} suffix="次"/></Descriptions.Item>
+      <Descriptions.Item label="有效情绪观察">
+        <Statistic value={source.mood_count} suffix="次"/>
+        {source.raw_mood_count>source.mood_count &&
+          <Typography.Text type="secondary" style={{fontSize:12}}>实际记录 {source.raw_mood_count} 条（{source.raw_mood_count-source.mood_count} 条同日重复已折叠）</Typography.Text>}
+      </Descriptions.Item>
       <Descriptions.Item label="平均心情"><Statistic value={source.avg_mood?source.avg_mood.toFixed(1):'—'} suffix="/10"/></Descriptions.Item>
       <Descriptions.Item label="日记"><Statistic value={source.journal_count} suffix="篇"/></Descriptions.Item>
       <Descriptions.Item label="测评"><Statistic value={source.assessment_count} suffix="次"/></Descriptions.Item>

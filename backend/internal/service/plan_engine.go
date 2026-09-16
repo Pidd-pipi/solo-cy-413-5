@@ -13,7 +13,10 @@ import (
 
 // PlanSignal 是近 14 天数据提炼出的建议信号；计划内容只由它决定，保证可复现、可回读。
 type PlanSignal struct {
-	WindowDays      int
+	WindowDays int
+	// RawMoodCount 为近 14 天持久化的原始情绪条数（含同日重复提交），仅用于来源展示。
+	RawMoodCount int
+	// MoodCount 为去重后的“有效观察”条数；建议、阈值、指纹一律基于它，重复提交不参与。
 	MoodCount       int
 	AvgMood         float64
 	LatestMood      int
@@ -47,30 +50,97 @@ type RecDay struct {
 
 const planWindowDays = 14
 
-// BuildSignal 从近 14 天的情绪/日记/测评中提取信号并计算稳定指纹。
-// 指纹对“同日完全相同的重复提交”去重，因此重复数据不会触发新版本或重复任务。
-func BuildSignal(moods []model.Mood, journals []model.Journal, assessments []model.UserAssessment) PlanSignal {
-	sig := PlanSignal{WindowDays: planWindowDays, TagCounts: map[string]int{}}
+// effectiveMood 是按“日期 + 心情等级 + 标签集合”归一后的一条有效观察。
+type effectiveMood struct {
+	date  string
+	level int
+	tags  []string // 已按枚举顺序去重排序，保证等价写法（顺序不同）也视为同一条
+	line  string
+}
 
-	sum, dedupMood := 0, map[string]bool{}
-	var moodLines []string
+// dedupeMoods 折叠同日、同等级、同标签的重复提交。
+// 同一天不同等级/标签的记录各自保留；不同日期的相同内容也各自保留。
+// 原始 model.Mood 不做任何修改或删除（原始记录仍留在数据库）。
+func dedupeMoods(moods []model.Mood) []effectiveMood {
+	order := []string{}
+	byKey := map[string]effectiveMood{}
 	for _, m := range moods {
-		sum += m.MoodLevel
-		for _, t := range parseMoodTags(m.MoodTags) {
-			if containsStr(constants.MoodTags, t) {
-				sig.TagCounts[t]++
-			}
+		date := m.RecordDate.Format("2006-01-02")
+		tags := canonicalTags(parseMoodTags(m.MoodTags))
+		em := effectiveMood{date: date, level: m.MoodLevel, tags: tags}
+		em.line = fmt.Sprintf("%s:%d:%s", date, em.level, strings.Join(tags, ","))
+		if _, ok := byKey[em.line]; !ok {
+			order = append(order, em.line)
 		}
-		line := fmt.Sprintf("%s:%d:%s", m.RecordDate.Format("2006-01-02"), m.MoodLevel, strings.Join(parseMoodTags(m.MoodTags), ","))
-		if !dedupMood[line] {
-			dedupMood[line] = true
-			moodLines = append(moodLines, line)
+		byKey[em.line] = em
+	}
+	out := make([]effectiveMood, 0, len(order))
+	for _, k := range order {
+		out = append(out, byKey[k])
+	}
+	// 按日期升序，保证 LatestMood 与时间序列稳定。
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].date != out[j].date {
+			return out[i].date < out[j].date
+		}
+		if out[i].level != out[j].level {
+			return out[i].level < out[j].level
+		}
+		return out[i].line < out[j].line
+	})
+	return out
+}
+
+// canonicalTags 仅保留合法标签并按枚举顺序去重排序。
+func canonicalTags(tags []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, t := range tags {
+		if !containsStr(constants.MoodTags, t) || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return indexOf(constants.MoodTags, out[i]) < indexOf(constants.MoodTags, out[j])
+	})
+	return out
+}
+
+func indexOf(list []string, v string) int {
+	for i, x := range list {
+		if x == v {
+			return i
 		}
 	}
-	sig.MoodCount = len(moods)
-	if len(moods) > 0 {
-		sig.AvgMood = float64(sum) / float64(len(moods))
-		sig.LatestMood = moods[len(moods)-1].MoodLevel
+	return len(list)
+}
+
+// BuildSignal 从近 14 天的情绪/日记/测评中提取信号并计算稳定指纹。
+// 同一账号同一天再次写入“等级与标签完全相同”的情绪会被折叠为一条有效观察，
+// 因此不改变平均心情、标签统计、阈值信号与指纹，也不会生成新版本；
+// 不同日期的相同内容、同日但内容不同的记录都会作为独立有效观察参与重算。
+func BuildSignal(moods []model.Mood, journals []model.Journal, assessments []model.UserAssessment) PlanSignal {
+	sig := PlanSignal{WindowDays: planWindowDays, TagCounts: map[string]int{}}
+	sig.RawMoodCount = len(moods)
+
+	// 先去重，再由“有效观察”统一派生全部统计、信号阈值与指纹，保证三者同一结论。
+	eff := dedupeMoods(moods)
+	sig.MoodCount = len(eff)
+
+	moodLines := make([]string, 0, len(eff))
+	sum := 0
+	for _, m := range eff {
+		sum += m.level
+		for _, t := range m.tags {
+			sig.TagCounts[t]++
+		}
+		moodLines = append(moodLines, m.line)
+	}
+	if len(eff) > 0 {
+		sig.AvgMood = float64(sum) / float64(len(eff))
+		sig.LatestMood = eff[len(eff)-1].level
 	}
 
 	journalLines, dedupJournal := []string{}, map[string]bool{}
@@ -81,21 +151,21 @@ func BuildSignal(moods []model.Mood, journals []model.Journal, assessments []mod
 			journalLines = append(journalLines, line)
 		}
 	}
-	sig.JournalCount = len(journals)
+	sig.JournalCount = len(journalLines)
 
 	assessmentLines, dedupAssess := []string{}, map[string]bool{}
 	for _, a := range assessments {
-		if strings.Contains(a.Result, "关照") {
-			sig.StressHigh = true
-		}
-		sig.LatestResult = a.Result
 		line := fmt.Sprintf("%s:%d", a.CreatedAt.Format("2006-01-02"), a.Score)
 		if !dedupAssess[line] {
 			dedupAssess[line] = true
 			assessmentLines = append(assessmentLines, line)
+			sig.AssessmentCount++
+			if strings.Contains(a.Result, "关照") {
+				sig.StressHigh = true
+			}
+			sig.LatestResult = a.Result
 		}
 	}
-	sig.AssessmentCount = len(assessments)
 
 	best := 0
 	for _, t := range constants.MoodTags {
@@ -129,7 +199,11 @@ func buildSummary(s PlanSignal) []string {
 	if s.MoodCount == 0 {
 		out = append(out, "近 14 天还没有情绪记录，计划从温和的作息与觉察开始，陪你建立节奏。")
 	} else {
-		out = append(out, fmt.Sprintf("近 14 天记录了 %d 次情绪，平均心情 %.1f/10。", s.MoodCount, s.AvgMood))
+		line := fmt.Sprintf("近 14 天有 %d 条有效情绪观察，平均心情 %.1f/10。", s.MoodCount, s.AvgMood)
+		if s.RawMoodCount > s.MoodCount {
+			line += fmt.Sprintf("（另有 %d 条同日重复提交已折叠，不计入建议；实际记录共 %d 条均已保留）", s.RawMoodCount-s.MoodCount, s.RawMoodCount)
+		}
+		out = append(out, line)
 	}
 	switch {
 	case s.StressHigh:
